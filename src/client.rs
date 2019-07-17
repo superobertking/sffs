@@ -2,7 +2,7 @@
 // extern crate log;
 
 use grpcio::{ChannelBuilder, EnvBuilder};
-use protos::{dfs::Handle, dfs_grpc::DfsClient};
+use rpctest::protos::{dfs::Handle, dfs_grpc::DfsClient};
 
 use std::sync::Arc;
 

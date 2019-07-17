@@ -3,35 +3,17 @@
 
 use futures::sync::oneshot;
 use futures::Future;
-use grpcio::{EnvBuilder, RpcContext, ServerBuilder, UnarySink};
-use protos::{
-    dfs::{Handle, ListReply},
-    dfs_grpc::{create_dfs, Dfs},
-};
+use grpcio::{EnvBuilder, ServerBuilder};
+use rpctest::dfsserver::DFSServer;
+use rpctest::protos::dfs_grpc::create_dfs;
 
 use std::io::{self, Read};
 use std::sync::Arc;
 use std::thread;
 
-#[derive(Clone)]
-struct DFSService;
-
-impl Dfs for DFSService {
-    fn list(&mut self, ctx: RpcContext, req: Handle, sink: UnarySink<ListReply>) {
-        println!("recv request: {:?}", req);
-        let mut rep = ListReply::new();
-        rep.set_x("hello".to_owned());
-
-        let f = sink
-            .success(rep)
-            .map_err(move |e| eprintln!("failed to reply {:?}: {:?}", req, e));
-        ctx.spawn(f);
-    }
-}
-
 fn main() {
     let env = Arc::new(EnvBuilder::new().build());
-    let service = create_dfs(DFSService);
+    let service = create_dfs(DFSServer);
     // let service = helloworld::create_greeter(GreeterService);
     let mut server = ServerBuilder::new(env)
         .register_service(service)
