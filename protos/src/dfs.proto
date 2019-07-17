@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+// distributed file system
+service DFS {
+    rpc list(Handle) returns (ListReply);
+}
+
+message ListReply {
+    string x = 1;
+}
+
+message Handle {
+    int32 x = 1;
+}

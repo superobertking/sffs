@@ -1,0 +1,24 @@
+[package]
+name = "rpctest"
+version = "0.1.0"
+authors = ["robertking <superobertking@icloud.com>"]
+edition = "2018"
+
+[workspace]
+members = [
+    "protos",
+]
+
+[dependencies]
+protos = { path = "protos" }
+futures = "0.1"
+grpcio = "0.4"
+protobuf = "2"
+
+[[bin]]
+name = "client"
+path = "src/client.rs"
+
+[[bin]]
+name = "server"
+path = "src/server.rs"
