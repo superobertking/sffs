@@ -4,16 +4,11 @@ version = "0.1.0"
 authors = ["robertking <superobertking@icloud.com>"]
 edition = "2018"
 
-# [workspace]
-# members = [
-#     "protos",
-# ]
-
 [dependencies]
-# protos = { path = "protos" }
 futures = "0.1"
 grpcio = "0.4"
 protobuf = "2"
+nix = "0.14"
 
 [build-dependencies]
 protoc-grpcio = "0.3.1"

@@ -2,13 +2,66 @@ syntax = "proto3";
 
 // distributed file system
 service DFS {
-    rpc list(Handle) returns (ListReply);
+    // getdir
+    rpc getdir(Void) returns (String);
+    // cd directory_name
+    rpc changedir(String) returns (Boolean);
+    // filecount
+    rpc filecount(ListOption) returns (Int64);
+
+    // ls [-l] [directory_name]
+    rpc openlist(ListRequest) returns (Boolean);
+    rpc nextlist(Void) returns (DirEntry);
+    rpc closelist(Void) returns (Boolean);
+
+    // put localfile [remotefile]
+    // get remotefile [localfile]
+    // randomread remotefile firstbyte numbytes
+    rpc openfiletoread(String) returns (Boolean);
+    rpc openfiletowrite(String) returns (Boolean);
+
+    rpc nextread(Void) returns (FileData);
+    rpc nextwrite(FileData) returns (Boolean);
+    rpc randomread(Range) returns (FileData);
+
+    // close should allow r/w
+    rpc closefile(Void) returns (Boolean);
 }
 
-message ListReply {
-    string x = 1;
+message Void {}
+
+message Boolean {
+    bool value = 1;
 }
 
-message Handle {
-    int32 x = 1;
+message Int64 {
+    int64 value = 1;
+}
+
+message String {
+    string value = 1;
+}
+
+message ListOption {
+    string option = 1;
+}
+
+message ListRequest {
+    string dir = 1;
+    ListOption option = 2;
+}
+
+message DirEntry {
+    // undefined
+}
+
+message FileData {
+    // undefined
+    /* opaque block = 1 */
+    int64 length = 2;
+}
+
+message Range {
+    int64 begin = 1;
+    int64 end = 2;
 }
