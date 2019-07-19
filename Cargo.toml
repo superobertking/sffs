@@ -9,7 +9,8 @@ edition = "2018"
 futures = "0.1"
 grpcio = "0.4"
 protobuf = "2"
-nix = "0.14"
+# nix = "0.14"
+chrono = "0.4"
 jemallocator = { version = "0.3.0", optional = true }
 
 [features]

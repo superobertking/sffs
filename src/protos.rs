@@ -46,17 +46,22 @@ impl From<String> for sffs::String {
 use std::convert::TryFrom;
 use std::fs;
 use std::io;
+use std::time::SystemTime;
 
 impl TryFrom<fs::DirEntry> for sffs::DirEntry {
     type Error = io::Error;
     #[inline]
     fn try_from(e: fs::DirEntry) -> Result<Self, Self::Error> {
         let meta = e.metadata()?;
+        let mtime = meta
+            .modified()?
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "SystemTime before UNIX EPOCH!"))?;
         Ok(Self {
             name: e.file_name().into_string().unwrap(),
             isdir: meta.is_dir(),
             size: meta.len() as i64,
-            // one more field: time
+            modifytime: mtime.as_secs() as i64,
             ..Default::default()
         })
     }

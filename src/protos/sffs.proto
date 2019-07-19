@@ -55,7 +55,7 @@ message DirEntry {
     string name = 1;
     bool isdir = 2;
     int64 size = 3;
-    // undefined: modify timestamp
+    int64 modifytime = 4;
 }
 
 message Block {
