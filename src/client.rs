@@ -2,7 +2,7 @@
 // extern crate log;
 
 use grpcio::{ChannelBuilder, EnvBuilder};
-use rpctest::protos::{dfs, dfs_grpc::DfsClient};
+use sffs::protos::{sffs as ffs, sffs_grpc::SffsClient};
 
 use std::io;
 use std::io::prelude::*;
@@ -13,24 +13,18 @@ fn prompt() {
     io::stdout().flush().expect("Cannot flush stdout.");
 }
 
-fn run_cmd(
-    client: &DfsClient,
-    cmd: &str,
-    mut cmd_iter: std::str::SplitWhitespace,
-) -> grpcio::Result<()> {
+fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespace) -> grpcio::Result<()> {
     match cmd {
         "getdir" => {
-            let reply = client.getdir(&dfs::Void::new())?;
+            let reply = client.getdir(&ffs::Void::new())?;
             println!("getdir succeeded with {}", reply.get_value());
         }
         "cd" => {
             // cd directory_name
             // TODO
             let path = cmd_iter.next().expect("invalid argument");
-            let mut request = dfs::String::new();
-            request.set_value(path.to_owned());
 
-            let reply = client.changedir(&request)?;
+            let reply = client.changedir(&path.into())?;
             if reply.get_value() {
                 println!("cd succeeded");
             } else {
@@ -38,14 +32,14 @@ fn run_cmd(
             }
         }
         "filecount" => {
-            let reply = client.filecount(&dfs::ListOption::new())?;
+            let reply = client.filecount(&ffs::ListOption::new())?;
             println!("filecount succeeded with count of {}", reply.get_value());
         }
         "ls" => {}
         "put" => {}
         "get" => {}
         "randomread" => {}
-        c => eprintln!("Unkown command: {:?}", c),
+        c => eprintln!("Unknown command: {:?}", c),
     }
     Ok(())
 }
@@ -53,16 +47,14 @@ fn run_cmd(
 fn main() {
     let env = Arc::new(EnvBuilder::new().build());
     let ch = ChannelBuilder::new(env).connect("localhost:50051");
-    let client = DfsClient::new(ch);
+    let client = SffsClient::new(ch);
 
     // for cmdline in io::stdin().lock().lines() {
     loop {
         prompt();
 
         let mut cmdline = String::new();
-        io::stdin()
-            .read_line(&mut cmdline)
-            .expect("Could not read a line!");
+        io::stdin().read_line(&mut cmdline).expect("Could not read a line!");
 
         // EOF
         if cmdline.is_empty() {

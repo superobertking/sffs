@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 // distributed file system
-service DFS {
+service SFFS {
     // getdir
     rpc getdir(Void) returns (String);
     // cd directory_name
@@ -20,9 +20,9 @@ service DFS {
     rpc openfiletoread(String) returns (Boolean);
     rpc openfiletowrite(String) returns (Boolean);
 
-    rpc nextread(Void) returns (FileData);
-    rpc nextwrite(FileData) returns (Boolean);
-    rpc randomread(Range) returns (FileData);
+    rpc nextread(Void) returns (Block);
+    rpc nextwrite(Block) returns (Boolean);
+    rpc randomread(Range) returns (Block);
 
     // close should allow r/w
     rpc closefile(Void) returns (Boolean);
@@ -52,16 +52,19 @@ message ListRequest {
 }
 
 message DirEntry {
-    // undefined
+    string name = 1;
+    bool isdir = 2;
+    int64 size = 3;
+    // undefined: modify timestamp
 }
 
-message FileData {
-    // undefined
-    /* opaque block = 1 */
+message Block {
+    bytes data = 1;
+    // length should be at most 512B
     int64 length = 2;
 }
 
 message Range {
-    int64 begin = 1;
-    int64 end = 2;
+    int64 start = 1;
+    int64 count = 2;
 }

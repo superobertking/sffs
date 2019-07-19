@@ -4,8 +4,8 @@
 use futures::sync::oneshot;
 use futures::Future;
 use grpcio::{EnvBuilder, ServerBuilder};
-use rpctest::dfsserver::DFSServer;
-use rpctest::protos::dfs_grpc::create_dfs;
+use sffs::protos::sffs_grpc::create_sffs;
+use sffs::sffsserver::SFFSServer;
 
 use std::io::{self, Read};
 use std::sync::Arc;
@@ -13,7 +13,7 @@ use std::thread;
 
 fn main() {
     let env = Arc::new(EnvBuilder::new().build());
-    let service = create_dfs(DFSServer);
+    let service = create_sffs(SFFSServer::new());
     // let service = helloworld::create_greeter(GreeterService);
     let mut server = ServerBuilder::new(env)
         .register_service(service)
