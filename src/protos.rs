@@ -45,27 +45,38 @@ impl From<String> for sffs::String {
     }
 }
 
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fs;
 use std::io;
 use std::time::SystemTime;
 
-impl TryFrom<fs::DirEntry> for sffs::DirEntry {
+impl TryFrom<(String, fs::Metadata)> for sffs::DirEntry {
     type Error = io::Error;
-    #[inline]
-    fn try_from(e: fs::DirEntry) -> Result<Self, Self::Error> {
-        let meta = e.metadata()?;
+    fn try_from((name, meta): (String, fs::Metadata)) -> Result<Self, Self::Error> {
         let mtime = meta
             .modified()?
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_err(|_| io::Error::new(io::ErrorKind::Other, "SystemTime before UNIX EPOCH!"))?;
         Ok(Self {
-            name: e.file_name().into_string().unwrap(),
+            name,
             isdir: meta.is_dir(),
             size: meta.len() as i64,
             modifytime: mtime.as_secs() as i64,
             ..Default::default()
         })
+    }
+}
+
+impl TryFrom<fs::DirEntry> for sffs::DirEntry {
+    type Error = io::Error;
+    fn try_from(e: fs::DirEntry) -> Result<Self, Self::Error> {
+        let meta = e.metadata()?;
+        let name = e
+            .file_name()
+            .into_string()
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "File name not UTF8!"))?;
+
+        (name, meta).try_into()
     }
 }
 
@@ -86,8 +97,6 @@ impl From<Vec<u8>> for sffs::Block {
         }
     }
 }
-
-use std::ops::Range;
 
 impl From<(i64, i64)> for sffs::Range {
     #[inline]

@@ -4,17 +4,24 @@ use grpcio::{RpcContext, RpcStatus, RpcStatusCode, UnarySink};
 
 use crate::protos::{sffs, sffs_grpc::Sffs, MAX_BLOCK_SIZE};
 
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::env;
-use std::fs::{self, DirEntry, File, ReadDir};
-use std::io;
+use std::fs::{self, File, ReadDir};
 use std::io::prelude::*;
 use std::os::unix::prelude::FileExt;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+
+#[derive(Clone, Copy)]
+enum NextEntry {
+    Dot,    // "."
+    DotDot, // ".."
+    File,   // any file
+}
 
 #[derive(Default)]
 struct SFFSServerInner {
-    opendir: Mutex<Option<(ReadDir,)>>,
+    opendir: Mutex<Option<(ReadDir, PathBuf, NextEntry)>>,
     openfile: Mutex<Option<File>>,
 }
 
@@ -73,7 +80,9 @@ impl Sffs for SFFSServer {
         let res = if (*guard).is_some() {
             false
         } else {
-            *guard = fs::read_dir(req.get_dir()).ok().map(|d| (d,));
+            *guard = fs::read_dir(req.get_dir())
+                .ok()
+                .map(|d| (d, req.get_dir().into(), NextEntry::Dot));
             (*guard).is_some()
         };
         drop(guard); // release lock
@@ -82,8 +91,6 @@ impl Sffs for SFFSServer {
     }
 
     fn nextlist(&mut self, ctx: RpcContext, req: sffs::Void, sink: UnarySink<sffs::DirEntry>) {
-        // TODO: return . and ..
-
         let mut guard = match self.0.opendir.lock() {
             Ok(guard) => guard,
             Err(_) => {
@@ -93,16 +100,42 @@ impl Sffs for SFFSServer {
         };
 
         let f = match *guard {
-            Some((ref mut dir,)) => loop {
-                match dir.next() {
-                    Some(entry) => {
-                        if let Ok(e) = entry {
-                            if let Ok(e) = sffs::DirEntry::try_from(e) {
-                                break sink.success(e);
+            Some((ref mut dir, ref path, ref mut next)) => match *next {
+                NextEntry::File => loop {
+                    match dir.next() {
+                        Some(entry) => {
+                            if let Ok(e) = entry {
+                                if let Ok(e) = sffs::DirEntry::try_from(e) {
+                                    break sink.success(e);
+                                }
                             }
                         }
+                        None => break sink.success(Default::default()),
                     }
-                    None => break sink.success(Default::default()),
+                },
+                NextEntry::Dot => {
+                    // FIXME: this unwrap
+                    *next = NextEntry::DotDot;
+                    let mut path = path.clone();
+                    path.push(".");
+                    let dir = File::open(path).unwrap();
+                    if let Ok(e) = (".".to_owned(), dir.metadata().unwrap()).try_into() {
+                        sink.success(e)
+                    } else {
+                        sink.success(Default::default())
+                    }
+                }
+                NextEntry::DotDot => {
+                    // FIXME: this unwrap
+                    *next = NextEntry::File;
+                    let mut path = path.clone();
+                    path.push("..");
+                    let dir = File::open(path).unwrap();
+                    if let Ok(e) = ("..".to_owned(), dir.metadata().unwrap()).try_into() {
+                        sink.success(e)
+                    } else {
+                        sink.success(Default::default())
+                    }
                 }
             },
             None => sink.fail(RpcStatus::new(RpcStatusCode::InvalidArgument, None)),
