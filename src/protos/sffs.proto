@@ -61,7 +61,6 @@ message DirEntry {
 message Block {
     bytes data = 1;
     // length should be at most 512B
-    int64 length = 2;
 }
 
 message Range {

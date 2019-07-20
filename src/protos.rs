@@ -3,6 +3,8 @@
 pub mod sffs;
 pub mod sffs_grpc;
 
+pub const MAX_BLOCK_SIZE: usize = 512;
+
 impl From<bool> for sffs::Boolean {
     #[inline]
     fn from(b: bool) -> Self {
@@ -64,5 +66,36 @@ impl TryFrom<fs::DirEntry> for sffs::DirEntry {
             modifytime: mtime.as_secs() as i64,
             ..Default::default()
         })
+    }
+}
+
+impl From<Vec<u8>> for sffs::Block {
+    #[inline]
+    fn from(b: Vec<u8>) -> Self {
+        // panic if length exceeded
+        assert!(
+            b.len() <= MAX_BLOCK_SIZE,
+            "buf length={} longer than MAX_BLOCK_SIZE={}",
+            b.len(),
+            MAX_BLOCK_SIZE
+        );
+
+        Self {
+            data: b,
+            ..Default::default()
+        }
+    }
+}
+
+use std::ops::Range;
+
+impl From<(i64, i64)> for sffs::Range {
+    #[inline]
+    fn from(r: (i64, i64)) -> Self {
+        Self {
+            start: r.0,
+            count: r.1,
+            ..Default::default()
+        }
     }
 }
