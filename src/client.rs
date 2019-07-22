@@ -1,13 +1,16 @@
 // #[macro_use]
 // extern crate log;
+// #![feature(let_chains)]
 use chrono::prelude::*;
 
 use grpcio::{ChannelBuilder, EnvBuilder};
 use sffs::protos::{sffs as ffs, sffs_grpc::SffsClient, MAX_BLOCK_SIZE};
+use sffs::CommonErrorKind::{InvalidArgument, NotFound};
 
 use std::fs::File;
-use std::io;
 use std::io::prelude::*;
+use std::io::{self, BufReader};
+use std::string::ToString;
 use std::sync::Arc;
 
 fn prompt() {
@@ -21,45 +24,44 @@ struct RemoteFile<'a> {
 }
 
 impl<'a> RemoteFile<'a> {
-    fn open(client: &'a SffsClient, name: String) -> sffs::Result<Self> {
+    fn open(client: &'a SffsClient, name: &str) -> sffs::Result<Self> {
         let reply = client.openfiletoread(&name.into())?;
-        Self::_new(client, false, reply.get_value())
+        Self::_new(client, name, false, reply.get_value())
     }
 
-    fn openlist(client: &'a SffsClient, name: String, option: Option<String>) -> sffs::Result<Self> {
+    fn openlist(client: &'a SffsClient, name: &str, option: Option<String>) -> sffs::Result<Self> {
         let mut request = ffs::ListRequest::new();
-        request.set_dir(name);
+        request.set_dir(name.to_owned());
         if let Some(option) = option {
             request.set_option(option.into());
         }
 
         let reply = client.openlist(&request)?;
-        Self::_new(client, false, reply.get_value())
+        Self::_new(client, name, true, reply.get_value())
     }
 
-    fn create(client: &'a SffsClient, name: String) -> sffs::Result<Self> {
+    fn create(client: &'a SffsClient, name: &str) -> sffs::Result<Self> {
         let reply = client.openfiletowrite(&name.into())?;
-        Self::_new(client, false, reply.get_value())
+        Self::_new(client, name, false, reply.get_value())
     }
 
     #[inline]
-    fn _new(client: &'a SffsClient, isdir: bool, reply: bool) -> sffs::Result<Self> {
+    fn _new(client: &'a SffsClient, name: &str, isdir: bool, reply: bool) -> sffs::Result<Self> {
         if reply {
             Ok(Self {
                 client: Some(client),
                 isdir,
             })
         } else {
-            Err(sffs::CommonErrorKind::NotFound.into())
+            Err(NotFound(name.to_owned()).into())
         }
     }
 
     fn close(&mut self) -> sffs::Result<()> {
-        let client = self.client.take();
-        if client.is_none() {
-            return Ok(());
-        }
-        let client = client.unwrap();
+        let client = match self.client.take() {
+            Some(client) => client,
+            None => return Ok(()),
+        };
         let reply = if self.isdir {
             client.closelist(&ffs::Void::new())?
         } else {
@@ -89,7 +91,7 @@ fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespa
         }
         "cd" => {
             // cd directory_name
-            let path = cmd_iter.next().ok_or("cd: invalid argument")?;
+            let path = cmd_iter.next().ok_or(InvalidArgument)?;
 
             let reply = client.changedir(&path.into())?;
             if reply.get_value() {
@@ -99,12 +101,14 @@ fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespa
             }
         }
         "filecount" => {
-            // TODO: filter
-            let reply = client.filecount(&ffs::ListOption::new())?;
+            let mut option = ffs::ListOption::new();
+            if let Some(o) = cmd_iter.next() {
+                option.set_option(o.to_owned());
+            }
+            let reply = client.filecount(&option)?;
             println!("filecount succeeded with count of {}", reply.get_value());
         }
         "ls" => {
-            // TODO: filter
             let mut cmd_iter = cmd_iter.peekable();
             let longopt = if let Some(&"-l") = cmd_iter.peek() {
                 cmd_iter.next();
@@ -113,9 +117,10 @@ fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespa
                 false
             };
             let path = cmd_iter.next().unwrap_or(".");
+            let option = cmd_iter.next().map(ToString::to_string);
 
             // open list
-            let mut remotelist = RemoteFile::openlist(client, path.to_owned(), None)?;
+            let mut remotelist = RemoteFile::openlist(client, path, option)?;
 
             // do list
             loop {
@@ -139,25 +144,22 @@ fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespa
             remotelist.close()?;
         }
         "get" => {
-            let remotepath = cmd_iter.next().ok_or("get failed: invalid argument")?;
+            let remotepath = cmd_iter.next().ok_or(InvalidArgument)?;
             let localpath = cmd_iter.next().unwrap_or(remotepath);
 
-            let mut localfile = File::create(localpath).map_err(|_| "cannot open local file")?;
-
+            // open local file
+            let mut localfile = File::create(localpath).map_err(|_| "cannot open local file as write")?;
             // open remote file
-            let mut remotefile = RemoteFile::open(client, remotepath.to_owned())?;
+            let mut remotefile = RemoteFile::open(client, remotepath)?;
 
             let mut bytes = 0usize;
             // read remote data to local file
             loop {
                 let reply = client.nextread(&ffs::Void::new())?;
-
                 if reply.get_data().is_empty() {
                     break;
                 }
-
                 localfile.write(reply.get_data())?;
-
                 bytes += reply.get_data().len();
             }
 
@@ -170,13 +172,13 @@ fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespa
         }
         "put" => {
             // TODO: check if same dir
-            let localpath = cmd_iter.next().ok_or("put failed: invalid argument")?;
+            let localpath = cmd_iter.next().ok_or(InvalidArgument)?;
             let remotepath = cmd_iter.next().unwrap_or(localpath);
 
-            let mut localfile = File::open(localpath).map_err(|_| "put failed: cannot open local file")?;
+            let mut localfile = File::open(localpath).map_err(|_| NotFound(localpath.to_owned()))?;
 
             // open remote file
-            let mut remotefile = RemoteFile::create(client, remotepath.to_owned())?;
+            let mut remotefile = RemoteFile::create(client, remotepath)?;
 
             let mut bytes = 0usize;
             // read local file to remote file
@@ -203,29 +205,23 @@ fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespa
             println!("put succeeded transferring {} bytes", bytes);
         }
         "randomread" => {
-            // TODO: fix error handling
-            let invarg = sffs::CommonErrorKind::InvalidArgument;
-
-            let remotepath = cmd_iter.next().ok_or(invarg)?;
-
-            let range_start = cmd_iter.next().ok_or(invarg)?.parse::<i64>().map_err(|_| invarg)?;
-            let range_count = cmd_iter.next().ok_or(invarg)?.parse::<i64>().map_err(|_| invarg)?;
+            use InvalidArgument as InvArg;
+            let remotepath = cmd_iter.next().ok_or(InvArg)?;
+            let range_start = cmd_iter.next().ok_or(InvArg)?.parse::<i64>().map_err(|_| InvArg)?;
+            let range_count = cmd_iter.next().ok_or(InvArg)?.parse::<i64>().map_err(|_| InvArg)?;
 
             if 0 <= range_count && range_count as usize <= MAX_BLOCK_SIZE {
-                return Err(invarg.into());
+                return Err(InvArg.into());
             }
 
             // open remote file
-            let mut remotefile = RemoteFile::open(client, remotepath.to_owned())?;
-
+            let mut remotefile = RemoteFile::open(client, remotepath)?;
             // read remote data to stdout
             let reply = client.randomread(&(range_start, range_count).into())?;
-
             // close remote file
             remotefile.close()?;
 
             println!("randomread succeeded transferring {} bytes", reply.get_data().len());
-
             print!("{}", String::from_utf8_lossy(&reply.get_data()));
         }
         c => eprintln!("Unknown command: {:?}", c),
@@ -233,17 +229,45 @@ fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespa
     Ok(())
 }
 
+fn usage(prog_name: &str) -> ! {
+    panic!("Usage: {} [-f <script>]", prog_name);
+}
+
+// -> std::process::ExitCode
 fn main() {
     let env = Arc::new(EnvBuilder::new().build());
     let ch = ChannelBuilder::new(env).connect("localhost:50051");
     let client = SffsClient::new(ch);
 
+    let mut args = std::env::args();
+    let prog_name = args.next().expect("Cannot get program name");
+    let mut inputstream: Box<dyn BufRead>;
+    let isfile: bool;
+    if let Some(o) = args.next() {
+        if o == "-f" {
+            if let Some(filename) = args.next() {
+                let file = File::open(filename).expect(&format!("Cannot open script file {}", prog_name));
+                inputstream = Box::new(BufReader::new(file));
+                isfile = true;
+            } else {
+                usage(&prog_name);
+            }
+        } else {
+            usage(&prog_name);
+        }
+    } else {
+        inputstream = Box::new(BufReader::new(io::stdin()));
+        isfile = false;
+    };
+
     // for cmdline in io::stdin().lock().lines() {
     loop {
-        prompt();
+        if !isfile {
+            prompt();
+        }
 
         let mut cmdline = String::new();
-        io::stdin().read_line(&mut cmdline).expect("Could not read a line!");
+        inputstream.read_line(&mut cmdline).expect("Could not read a line!");
 
         // EOF
         if cmdline.is_empty() {
@@ -252,6 +276,7 @@ fn main() {
 
         let mut cmdline_iter = cmdline.split_whitespace();
         let cmd = cmdline_iter.next();
+        // continue when input line is empty
         if cmd.is_none() {
             continue;
         }
@@ -262,8 +287,8 @@ fn main() {
             match e {
                 IO(e) => eprintln!("{} failed with I/O Error {}", cmd, e),
                 RPC(e) => eprintln!("{} failed with RPC Error {}", cmd, e),
-                Common(e) => eprintln!("{:?}", e),
-                Custom(e) => eprintln!("{}", e),
+                Common(e) => eprintln!("{} failed {}", cmd, e),
+                Custom(e) => eprintln!("{} failed {}", cmd, e),
             }
         }
     }

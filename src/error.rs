@@ -12,22 +12,36 @@ pub enum ExecuteError {
     Custom(Box<dyn Error + Send + Sync>),
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum CommonErrorKind {
-    Generic,
-    InvalidArgument,
-    NotFound,
-    CloseFail,
-}
-
 impl fmt::Display for ExecuteError {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "hello")
+        write!(f, "{:?}", self)
     }
 }
 
 impl Error for ExecuteError {}
+
+#[derive(Debug, Clone)]
+pub enum CommonErrorKind {
+    Generic,
+    InvalidArgument,
+    CloseFail,
+    NotFound(String),
+}
+
+impl fmt::Display for CommonErrorKind {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use CommonErrorKind::*;
+        let s = match self {
+            &Generic => "",
+            &InvalidArgument => "invalid argument",
+            &CloseFail => "close failed",
+            &NotFound(ref name) => return write!(f, "{} not found", name),
+        };
+        write!(f, "{}", s)
+    }
+}
 
 impl From<io::Error> for ExecuteError {
     #[inline]
