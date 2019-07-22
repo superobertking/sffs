@@ -1,5 +1,9 @@
+pub mod error;
 pub mod protos;
 pub mod sffsserver;
+
+pub use error::{CommonErrorKind, ExecuteError, Result};
+pub use sffsserver::SFFSServer;
 
 #[cfg(feature = "jemalloc")]
 #[global_allocator]

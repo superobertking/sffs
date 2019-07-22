@@ -45,6 +45,16 @@ impl From<String> for sffs::String {
     }
 }
 
+impl From<String> for sffs::ListOption {
+    #[inline]
+    fn from(s: String) -> Self {
+        Self {
+            option: s,
+            ..Default::default()
+        }
+    }
+}
+
 use std::convert::{TryFrom, TryInto};
 use std::fs;
 use std::io;
