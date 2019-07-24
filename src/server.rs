@@ -12,12 +12,13 @@ use std::sync::Arc;
 use std::thread;
 
 fn main() {
+    let host = std::env::args().skip(1).next().unwrap_or("127.0.0.1".to_owned());
     let env = Arc::new(EnvBuilder::new().build());
     let service = create_sffs(SFFSServer::new());
     // let service = helloworld::create_greeter(GreeterService);
     let mut server = ServerBuilder::new(env)
         .register_service(service)
-        .bind("127.0.0.1", 50_051)
+        .bind(&host, 50_051)
         .build()
         .unwrap();
     server.start();

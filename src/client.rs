@@ -180,7 +180,6 @@ fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespa
             println!("get succeeded transferring {} bytes", bytes);
         }
         "put" => {
-            // TODO: check if same dir
             let localpath = cmd_iter.next().ok_or(InvalidArgument)?;
             let remotepath = cmd_iter.next().unwrap_or(localpath);
 
@@ -199,9 +198,10 @@ fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespa
                     break;
                 }
                 buf.truncate(len);
-                bytes += len;
 
                 if client.nextwrite(&buf.into())?.get_value() {
+                    bytes += len;
+                } else {
                     eprintln!("put failed: cannot write remote file");
                 }
             }
@@ -219,7 +219,7 @@ fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespa
             let range_start = cmd_iter.next().ok_or(InvArg)?.parse::<i64>().map_err(|_| InvArg)?;
             let range_count = cmd_iter.next().ok_or(InvArg)?.parse::<i64>().map_err(|_| InvArg)?;
 
-            if 0 <= range_count && range_count as usize <= MAX_BLOCK_SIZE {
+            if !(0 <= range_count && range_count as usize <= MAX_BLOCK_SIZE) {
                 return Err(InvArg.into());
             }
 
@@ -239,17 +239,21 @@ fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespa
 }
 
 fn usage(prog_name: &str) -> ! {
-    panic!("Usage: {} [-f <script>]", prog_name);
+    panic!("Usage: {} <hostname> [-f <script>]", prog_name);
 }
 
 // -> std::process::ExitCode
 fn main() {
-    let env = Arc::new(EnvBuilder::new().build());
-    let ch = ChannelBuilder::new(env).connect("localhost:50051");
-    let client = SffsClient::new(ch);
-
     let mut args = std::env::args();
     let prog_name = args.next().expect("Cannot get program name");
+
+    let mut addr = args.next().unwrap_or_else(|| usage(&prog_name));
+    addr.push_str(":50051");
+
+    let env = Arc::new(EnvBuilder::new().build());
+    let ch = ChannelBuilder::new(env).connect(&addr);
+    let client = SffsClient::new(ch);
+
     let mut inputstream: Box<dyn BufRead>;
     let isfile: bool;
     if let Some(o) = args.next() {
@@ -278,18 +282,16 @@ fn main() {
         let mut cmdline = String::new();
         inputstream.read_line(&mut cmdline).expect("Could not read a line!");
 
-        // EOF
+        // EOF (with no '\n')
         if cmdline.is_empty() {
             break;
         }
 
         let mut cmdline_iter = cmdline.split_whitespace();
-        let cmd = cmdline_iter.next();
-        // continue when input line is empty
-        if cmd.is_none() {
-            continue;
-        }
-        let cmd = cmd.unwrap();
+        let cmd = match cmdline_iter.next() {
+            Some(cmd) => cmd,
+            None => continue, //continue when command line is empty
+        };
 
         if let Err(e) = run_cmd(&client, &cmd, cmdline_iter) {
             use sffs::ExecuteError::{Common, Custom, IO, RPC};

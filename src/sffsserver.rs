@@ -1,13 +1,13 @@
 use futures::Future;
 use grpcio::{RpcContext, RpcStatus, RpcStatusCode, UnarySink};
-// use nix::unistd;
+use nix::unistd;
 
 use crate::filter::MetaDataFilter;
 use crate::protos::{sffs, sffs_grpc::Sffs, MAX_BLOCK_SIZE};
 
 use std::convert::{TryFrom, TryInto};
 use std::env;
-use std::fs::{self, File, ReadDir};
+use std::fs::{self, File, OpenOptions, ReadDir};
 use std::io::prelude::*;
 use std::os::unix::prelude::FileExt;
 use std::path::PathBuf;
@@ -63,19 +63,14 @@ impl SFFSServer {
             None => return Some(0.into()),
         };
 
-        let mut count = fs::read_dir(".")
-            .ok()?
-            .filter_map(|e| e.ok().map(|e| e.metadata()))
-            .filter(|m| m.as_ref().map(|m| filter.check(&m)).unwrap_or(false))
-            .count();
+        let dots = ([".", ".."].iter())
+            .filter_map(|ename| File::open(ename).ok())
+            .filter_map(|f| f.metadata().ok());
+        let files = (fs::read_dir(".").ok()?)
+            .filter_map(|e| e.ok())
+            .filter_map(|e| e.metadata().ok());
 
-        // special case
-        for ename in &[".", ".."] {
-            let meta = File::open(ename).ok()?.metadata().ok()?;
-            if filter.check(&meta) {
-                count += 1;
-            }
-        }
+        let count = dots.chain(files).filter(|meta| filter.check(&meta)).count();
 
         Some((count as i64).into())
     }
@@ -100,7 +95,6 @@ impl SFFSServer {
         Some(res.into())
     }
     fn nextlist(&mut self) -> Option<sffs::DirEntry> {
-        // TODO: filter
         let mut guard = self.0.opendir.lock().ok()?;
 
         let (ref mut dir, ref path, ref mut next, ref filter) = guard.as_mut()?;
@@ -165,7 +159,14 @@ impl SFFSServer {
         let res = if (*guard).is_some() {
             false
         } else {
-            *guard = File::create(req.get_value()).ok();
+            /* Solve putting same file problem. On UNIX, unlink will decrement
+            file RC. Opening FD will can still function until FD closed. */
+            unistd::unlink(req.get_value()).ok()?;
+            *guard = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(req.get_value())
+                .ok();
             (*guard).is_some()
         };
         Some(res.into())
@@ -189,7 +190,7 @@ impl SFFSServer {
         Some(res.into())
     }
     fn randomread(&mut self, req: &sffs::Range) -> Option<sffs::Block> {
-        let mut guard = self.0.openfile.lock().ok()?;;
+        let mut guard = self.0.openfile.lock().ok()?;
 
         let ref mut file = guard.as_mut()?;
 
@@ -199,7 +200,7 @@ impl SFFSServer {
         Some(buf.into())
     }
     fn closefile(&mut self) -> Option<sffs::Boolean> {
-        let mut guard = self.0.openfile.lock().ok()?;;
+        let mut guard = self.0.openfile.lock().ok()?;
         Some((*guard).take().is_some().into())
     }
 }
