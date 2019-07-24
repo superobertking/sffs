@@ -2,6 +2,7 @@ use futures::Future;
 use grpcio::{RpcContext, RpcStatus, RpcStatusCode, UnarySink};
 // use nix::unistd;
 
+use crate::filter::MetaDataFilter;
 use crate::protos::{sffs, sffs_grpc::Sffs, MAX_BLOCK_SIZE};
 
 use std::convert::{TryFrom, TryInto};
@@ -21,7 +22,7 @@ enum NextEntry {
 
 #[derive(Default)]
 struct SFFSServerInner {
-    opendir: Mutex<Option<(ReadDir, PathBuf, NextEntry)>>,
+    opendir: Mutex<Option<(ReadDir, PathBuf, NextEntry, MetaDataFilter)>>,
     openfile: Mutex<Option<File>>,
 }
 
@@ -57,10 +58,33 @@ impl SFFSServer {
         Some(env::set_current_dir(req.get_value()).is_ok().into())
     }
     fn filecount(&mut self, req: &sffs::ListOption) -> Option<sffs::Int64> {
-        // TODO: filter
-        Some((fs::read_dir(".").ok()?.filter(|e| e.is_ok()).count() as i64).into())
+        let filter = match MetaDataFilter::new(req.get_option()) {
+            Some(filter) => filter,
+            None => return Some(0.into()),
+        };
+
+        let mut count = fs::read_dir(".")
+            .ok()?
+            .filter_map(|e| e.ok().map(|e| e.metadata()))
+            .filter(|m| m.as_ref().map(|m| filter.check(&m)).unwrap_or(false))
+            .count();
+
+        // special case
+        for ename in &[".", ".."] {
+            let meta = File::open(ename).ok()?.metadata().ok()?;
+            if filter.check(&meta) {
+                count += 1;
+            }
+        }
+
+        Some((count as i64).into())
     }
     fn openlist(&mut self, req: &sffs::ListRequest) -> Option<sffs::Boolean> {
+        let filter = match MetaDataFilter::new(req.get_option().get_option()) {
+            Some(filter) => filter,
+            None => return Some(false.into()),
+        };
+
         let mut guard = self.0.opendir.lock().ok()?;
 
         let res = if (*guard).is_some() {
@@ -68,7 +92,7 @@ impl SFFSServer {
         } else {
             *guard = fs::read_dir(req.get_dir())
                 .ok()
-                .map(|d| (d, req.get_dir().into(), NextEntry::Dot));
+                .map(|d| (d, req.get_dir().into(), NextEntry::Dot, filter));
             (*guard).is_some()
         };
         drop(guard); // release lock
@@ -79,7 +103,7 @@ impl SFFSServer {
         // TODO: filter
         let mut guard = self.0.opendir.lock().ok()?;
 
-        let (ref mut dir, ref path, ref mut next) = guard.as_mut()?;
+        let (ref mut dir, ref path, ref mut next, ref filter) = guard.as_mut()?;
 
         let mut getnext = || -> Option<sffs::DirEntry> {
             // There will definitely be one entry, even may be empty.
@@ -87,18 +111,28 @@ impl SFFSServer {
                 match *next {
                     // next is still file
                     NextEntry::File => match dir.next() {
-                        Some(entry) => break sffs::DirEntry::try_from(entry.ok()?).ok()?,
+                        Some(entry) => {
+                            let entry = entry.ok()?;
+                            let meta = entry.metadata().ok()?;
+                            if filter.check(&meta) {
+                                break sffs::DirEntry::try_from(entry).ok()?;
+                            }
+                        }
                         None => break sffs::DirEntry::default(),
                     },
                     NextEntry::Dot => {
                         *next = NextEntry::DotDot;
                         let meta = File::open(path.join(".")).ok()?.metadata().ok()?;
-                        break (".".to_owned(), meta).try_into().ok()?;
+                        if filter.check(&meta) {
+                            break (".".to_owned(), meta).try_into().ok()?;
+                        }
                     }
                     NextEntry::DotDot => {
                         *next = NextEntry::File;
                         let meta = File::open(path.join("..")).ok()?.metadata().ok()?;
-                        break ("..".to_owned(), meta).try_into().ok()?;
+                        if filter.check(&meta) {
+                            break ("..".to_owned(), meta).try_into().ok()?;
+                        }
                     }
                 }
             })

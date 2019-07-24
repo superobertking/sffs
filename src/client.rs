@@ -2,15 +2,15 @@
 // extern crate log;
 // #![feature(let_chains)]
 use chrono::prelude::*;
-
 use grpcio::{ChannelBuilder, EnvBuilder};
+
+use sffs::filter::MetaDataFilter;
 use sffs::protos::{sffs as ffs, sffs_grpc::SffsClient, MAX_BLOCK_SIZE};
 use sffs::CommonErrorKind::{InvalidArgument, NotFound};
 
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::{self, BufReader};
-use std::string::ToString;
 use std::sync::Arc;
 
 fn prompt() {
@@ -116,8 +116,17 @@ fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespa
             } else {
                 false
             };
-            let path = cmd_iter.next().unwrap_or(".");
-            let option = cmd_iter.next().map(ToString::to_string);
+            let (path, option) = match cmd_iter.next() {
+                Some(token) => {
+                    if MetaDataFilter::is_valid_pattern(token) {
+                        (cmd_iter.next().unwrap_or("."), Some(token)) // token as option
+                    } else {
+                        (token, cmd_iter.next()) // token as path
+                    }
+                }
+                None => (".", None), // there won't be another token afterwards
+            };
+            let option = option.map(|s| s.to_owned());
 
             // open list
             let mut remotelist = RemoteFile::openlist(client, path, option)?;
