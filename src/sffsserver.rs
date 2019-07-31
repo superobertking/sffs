@@ -160,8 +160,10 @@ impl SFFSServer {
             false
         } else {
             /* Solve putting same file problem. On UNIX, unlink will decrement
-            file RC. Opening FD will can still function until FD closed. */
-            unistd::unlink(req.get_value()).ok()?;
+             * file RC. Opening FD will can still function until FD closed.
+             * Don't care about the return result. Overwritting is not
+             * expected behavior */
+            let _ = unistd::unlink(req.get_value());
             *guard = OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -174,7 +176,7 @@ impl SFFSServer {
     fn nextread(&mut self) -> Option<sffs::Block> {
         let mut guard = self.0.openfile.lock().ok()?;
 
-        let ref mut file = guard.as_mut()?;
+        let file = guard.as_mut()?;
 
         let mut buf = vec![0u8; MAX_BLOCK_SIZE];
         let len = file.read(&mut buf).unwrap_or(0);
@@ -184,7 +186,7 @@ impl SFFSServer {
     fn nextwrite(&mut self, req: &sffs::Block) -> Option<sffs::Boolean> {
         let mut guard = self.0.openfile.lock().ok()?;
 
-        let ref mut file = guard.as_mut()?;
+        let file = guard.as_mut()?;
 
         let res = file.write(req.get_data()).is_ok();
         Some(res.into())
@@ -192,7 +194,7 @@ impl SFFSServer {
     fn randomread(&mut self, req: &sffs::Range) -> Option<sffs::Block> {
         let mut guard = self.0.openfile.lock().ok()?;
 
-        let ref mut file = guard.as_mut()?;
+        let file = guard.as_mut()?;
 
         let mut buf = vec![0u8; req.get_count() as usize];
         let len = file.read_at(&mut buf, req.get_start() as u64).unwrap_or(0);
