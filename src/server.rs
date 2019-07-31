@@ -18,7 +18,7 @@ fn main() {
     // let service = helloworld::create_greeter(GreeterService);
     let mut server = ServerBuilder::new(env)
         .register_service(service)
-        .bind(&host, 50_051)
+        .bind(host.as_str(), 50_051)
         .build()
         .unwrap();
     server.start();

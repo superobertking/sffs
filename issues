@@ -1,0 +1,16 @@
+------ space ------
+cd 's p a c e'
+cd "s p a c e"
+cd s\ p\ a\ c\ e
+
+------ put ------
+put /tmp/test test2
+put /tmp/test /tmp/test2
+	put failed with RPC Error RpcFailure(RpcStatus { status: Internal, details: Some("") })
+
+------ get ------
+get /tmp/test /tmp/test
+	get succeeded transferring 0 bytes
+
+------ read ------
+inconsist prompt
