@@ -3,10 +3,12 @@
 // #![feature(let_chains)]
 use chrono::prelude::*;
 use grpcio::{ChannelBuilder, EnvBuilder};
+use nix::unistd;
 
 use sffs::filter::MetaDataFilter;
 use sffs::protos::{sffs as ffs, sffs_grpc::SffsClient, MAX_BLOCK_SIZE};
 use sffs::CommonErrorKind::{InvalidArgument, NotFound};
+use sffs::common;
 
 use std::fs::File;
 use std::io::prelude::*;
@@ -25,8 +27,8 @@ struct RemoteFile<'a> {
 
 impl<'a> RemoteFile<'a> {
     fn open(client: &'a SffsClient, name: &str) -> sffs::Result<Self> {
-        let reply = client.openfiletoread(&name.into())?;
-        Self::_new(client, name, false, reply.get_value())
+        let is_found = client.openfiletoread(&name.into())?;
+        Self::_new(client, name, false, is_found.get_value())
     }
 
     fn openlist(client: &'a SffsClient, name: &str, option: Option<String>) -> sffs::Result<Self> {
@@ -36,18 +38,18 @@ impl<'a> RemoteFile<'a> {
             request.set_option(option.into());
         }
 
-        let reply = client.openlist(&request)?;
-        Self::_new(client, name, true, reply.get_value())
+        let is_found = client.openlist(&request)?;
+        Self::_new(client, name, true, is_found.get_value())
     }
 
     fn create(client: &'a SffsClient, name: &str) -> sffs::Result<Self> {
-        let reply = client.openfiletowrite(&name.into())?;
-        Self::_new(client, name, false, reply.get_value())
+        let is_found = client.openfiletowrite(&name.into())?;
+        Self::_new(client, name, false, is_found.get_value())
     }
 
     #[inline]
-    fn _new(client: &'a SffsClient, name: &str, isdir: bool, reply: bool) -> sffs::Result<Self> {
-        if reply {
+    fn _new(client: &'a SffsClient, name: &str, isdir: bool, is_found: bool) -> sffs::Result<Self> {
+        if is_found {
             Ok(Self {
                 client: Some(client),
                 isdir,
@@ -86,15 +88,15 @@ impl<'a> Drop for RemoteFile<'a> {
 fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespace) -> sffs::Result<()> {
     match cmd {
         "getdir" | "pwd" => {
-            let reply = client.getdir(&ffs::Void::new())?;
-            println!("getdir succeeded with {}", reply.get_value());
+            let is_found = client.getdir(&ffs::Void::new())?;
+            println!("getdir succeeded with {}", is_found.get_value());
         }
         "cd" => {
             // cd directory_name
             let path = cmd_iter.next().ok_or(InvalidArgument)?;
 
-            let reply = client.changedir(&path.into())?;
-            if reply.get_value() {
+            let is_success = client.changedir(&path.into())?;
+            if is_success.get_value() {
                 println!("cd succeeded");
             } else {
                 println!("cd failed");
@@ -131,22 +133,22 @@ fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespa
             // open list
             let mut remotelist = RemoteFile::openlist(client, path, option)?;
 
-            // do list
+            // traverse list
             loop {
                 let entry = client.nextlist(&ffs::Void::new())?;
                 if entry.get_name().is_empty() {
                     break;
                 }
 
-                let tail = ["", "/"][entry.get_isdir() as usize];
+                print!("{}", entry.get_name());
+                if entry.get_isdir() { print!("/"); }
                 if longopt {
                     let time = Utc
                         .timestamp(entry.get_modifytime(), 0)
                         .format("%a\t%b\t%d\t%T\t%Z\t%Y");
-                    println!("{}{}\t{}\t{}", entry.get_name(), tail, entry.get_size(), time);
-                } else {
-                    println!("{}{}", entry.get_name(), tail);
+                    print!("\t{}\t{}", entry.get_size(), time);
                 }
+                print!("\n");
             }
 
             // close list
@@ -156,10 +158,12 @@ fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespa
             let remotepath = cmd_iter.next().ok_or(InvalidArgument)?;
             let localpath = cmd_iter.next().unwrap_or(remotepath);
 
-            // open local file
-            let mut localfile = File::create(localpath).map_err(|_| "cannot open local file as write")?;
             // open remote file
             let mut remotefile = RemoteFile::open(client, remotepath)?;
+
+            // open local file
+            let _ = unistd::unlink(localpath);
+            let mut localfile = File::create(localpath).map_err(|_| "cannot open local file as write")?;
 
             let mut bytes = 0usize;
             // read remote data to local file
@@ -239,7 +243,8 @@ fn run_cmd(client: &SffsClient, cmd: &str, mut cmd_iter: std::str::SplitWhitespa
 }
 
 fn usage(prog_name: &str) -> ! {
-    panic!("Usage: {} <hostname> [-f <script>]", prog_name);
+    println!("Usage: {} <hostname> [-f <script>]", prog_name);
+    ::std::process::exit(1);
 }
 
 // -> std::process::ExitCode
@@ -248,7 +253,8 @@ fn main() {
     let prog_name = args.next().expect("Cannot get program name");
 
     let mut addr = args.next().unwrap_or_else(|| usage(&prog_name));
-    addr.push_str(":50051");
+    addr.push_str(":");
+    addr.push_str(&common::COMM_PORT.to_string());
 
     let env = Arc::new(EnvBuilder::new().build());
     let ch = ChannelBuilder::new(env).connect(&addr);
