@@ -1,8 +1,8 @@
 [package]
 name = "sffs"
 version = "0.1.0"
-description = "Simple Tarnish (Rust) File Service/System"
-authors = ["robertking <superobertking@icloud.com>"]
+description = "Simple Flat File Service/System"
+authors = ["robertking <superobertking@icloud.com>", "Dappur <dappur@126.com>"]
 edition = "2018"
 
 [dependencies]
@@ -26,3 +26,7 @@ path = "src/client.rs"
 [[bin]]
 name = "server"
 path = "src/server.rs"
+
+[[bin]]
+name = "single"
+path = "src/op_dir.rs"

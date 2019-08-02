@@ -6,6 +6,7 @@ use futures::Future;
 use grpcio::{EnvBuilder, ServerBuilder};
 use sffs::protos::sffs_grpc::create_sffs;
 use sffs::sffsserver::SFFSServer;
+use sffs::common;
 
 use std::io::{self, Read};
 use std::sync::Arc;
@@ -18,7 +19,7 @@ fn main() {
     // let service = helloworld::create_greeter(GreeterService);
     let mut server = ServerBuilder::new(env)
         .register_service(service)
-        .bind(host.as_str(), 50_051)
+        .bind(host, common::COMM_PORT)
         .build()
         .unwrap();
     server.start();
