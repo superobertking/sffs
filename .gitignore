@@ -1,4 +1,4 @@
-Cargo.lock
+# Cargo.lock    # binary should check-in this
 /target
 **/*.rs.bk
 
